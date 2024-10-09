@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to set up Auto Scaling for a Node.js application with scaling based on CPU utilization
+
+Resources:
+  # EC2 Launch Template
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties: 
+      LaunchTemplateName: manhwaAppLaunchTemplate
+      LaunchTemplateData: 
+        ImageId: ami-xxxxxxxx  # Replace with your AMI ID
+        InstanceType: t2.micro
+        KeyName: MyKeyPair  # Replace with your Key Pair
+        SecurityGroupIds:
+          - !Ref InstanceSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            amazon-linux-extras install -y nginx1
+            service nginx start
+            cd /home/ec2-user/
+            yum install -y nodejs npm
+            git clone https://github.com/your-repository.git # Replace with your repository
+            cd your-repository # Replace with your app directory
+            npm install
+            npm start
+
+  # Security Group for EC2 Instances
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP and SSH access
+      VpcId: vpc-xxxxxxxx  # Replace with your VPC ID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  # Auto Scaling Group
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: manhwaAppASG
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+      MinSize: '1'
+      MaxSize: '3'
+      DesiredCapacity: '1'
+      VPCZoneIdentifier:
+        - subnet-xxxxxxxx  # Replace with your Subnet ID(s)
+      TargetGroupARNs: 
+        - !Ref TargetGroup
+      HealthCheckGracePeriod: 300
+      HealthCheckType: EC2
+
+  # Load Balancer
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: manhwaAppLoadBalancer
+      Subnets:
+        - subnet-xxxxxxxx  # Replace with your Subnet ID(s)
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+      SecurityGroups:
+        - !Ref InstanceSecurityGroup
+
+  # Target Group for the Load Balancer
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: manhwaAppTargetGroup
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      Port: 80
+      Protocol: HTTP
+      VpcId: vpc-xxxxxxxx  # Replace with your VPC ID
+
+  # Listener for Load Balancer
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  # CloudWatch Alarm for CPU Utilization > 70%
+  CPUUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Alarm when CPU exceeds 70%
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: 360
+      EvaluationPeriods: 2
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref ScaleUpPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref AutoScalingGroup
+
+  # Scaling Policy to Scale Up
+  ScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 70
+
+  # Scaling Policy to Scale Down (Optional)
+  ScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 30
