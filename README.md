@@ -10,7 +10,8 @@ Features
 4. Monitoring with CloudWatch Alarms.
 5. Security groups configured for HTTP and SSH access.
 6. HTTPS-enabled communication with a load balancer (requires an SSL certificate).
-7. 
+
+   
 Prerequisites
 
 AWS Account with access to EC2, CloudFormation, Auto Scaling, and CloudWatch.
